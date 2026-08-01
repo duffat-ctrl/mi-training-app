@@ -35,6 +35,35 @@
   }
   #root{max-width:920px;margin:0 auto;padding:28px 20px 80px;}
 
+  /* ---------- Settings bar ---------- */
+  .settings-bar{
+    background:var(--paper-raised);border:1px solid var(--line);border-radius:12px;
+    padding:10px 14px;margin-bottom:20px;
+  }
+  .settings-row{display:flex;align-items:center;justify-content:space-between;gap:10px;}
+  .settings-status{font-size:12.5px;font-weight:600;}
+  .settings-status.ok{color:var(--teal);}
+  .settings-status.warn{color:var(--spark);}
+  .settings-toggle{
+    background:none;border:1px solid var(--line);border-radius:8px;
+    padding:5px 12px;font-size:12.5px;cursor:pointer;color:var(--ink-soft);
+  }
+  .settings-toggle:hover{border-color:var(--teal);color:var(--teal-deep);}
+  .settings-panel{margin-top:12px;padding-top:12px;border-top:1px solid var(--line);}
+  .settings-label{display:block;font-size:12px;font-weight:600;color:var(--ink-soft);margin-bottom:5px;}
+  .settings-input{
+    width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:8px;
+    font-family:var(--sans);font-size:13.5px;background:var(--paper);color:var(--ink);
+    margin-bottom:4px;
+  }
+  .settings-input:focus{outline:none;border-color:var(--teal);}
+  .settings-save{
+    margin-top:10px;background:var(--teal-deep);color:#fff;border:none;border-radius:8px;
+    padding:8px 18px;font-size:13px;font-weight:700;cursor:pointer;
+  }
+  .settings-save:hover{background:var(--teal);}
+  .settings-hint{font-size:11.5px;color:var(--ink-soft);line-height:1.6;margin-top:10px;}
+
   /* ---------- Header ---------- */
   .app-header{margin-bottom:28px;}
   .eyebrow{
@@ -281,6 +310,7 @@ function findExercise(catId, key){
 
 /* ================= State ================= */
 // view: {name:'home'} | {name:'category', catId} | {name:'exercise', catId, key} | {name:'chat', catId, key}
+let settingsOpen = false;
 let state = {
   view: {name:"home"},
   messages: [], // {role:'user'|'assistant', content:string}
@@ -293,24 +323,63 @@ function setState(patch){
   render();
 }
 
+/* ================= API key / model settings ================= */
+let apiKey = "";
+let modelId = "gemini-3.6-flash";
+const MODEL_OPTIONS = [
+  {id:"gemini-3.6-flash", label:"Gemini 3.6 Flash（推奨・高速）"},
+  {id:"gemini-3.5-flash-lite", label:"Gemini 3.5 Flash-Lite（軽量・低コスト）"},
+  {id:"gemini-2.5-flash", label:"Gemini 2.5 Flash（旧世代）"}
+];
+
 /* ================= API ================= */
-async function callClaude(systemPrompt, messages){
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
+async function requestGemini(systemPrompt, contents, useBearer){
+  const base = "https://generativelanguage.googleapis.com/v1beta/models/"
+    + encodeURIComponent(modelId) + ":generateContent";
+  const url = useBearer ? base : base + "?key=" + encodeURIComponent(apiKey);
+  const headers = {"Content-Type":"application/json"};
+  if(useBearer) headers["Authorization"] = "Bearer " + apiKey;
+
+  return fetch(url, {
     method:"POST",
-    headers:{"Content-Type":"application/json"},
+    headers: headers,
     body: JSON.stringify({
-      model:"claude-sonnet-4-6",
-      max_tokens:1000,
-      system: systemPrompt,
-      messages: messages
+      systemInstruction: {parts:[{text: systemPrompt}]},
+      contents: contents,
+      generationConfig: {maxOutputTokens: 1000}
     })
   });
+}
+
+async function callGemini(systemPrompt, messages){
+  if(!apiKey){
+    throw new Error("Google AI StudioのAPIキーが未設定です。上部の「APIキー設定」から入力してください。");
+  }
+  const contents = messages.map(m => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{text: m.content}]
+  }));
+
+  // 1回目: ?key= クエリパラメータで認証（従来のAIzaキー・多くのAQ.キーで機能する方式）
+  let response = await requestGemini(systemPrompt, contents, false);
+
+  // 401（認証エラー）の場合のみ、Authorization: Bearer ヘッダー方式で再試行
+  // 新しい「AQ.」形式のキーは、環境によってこちらでないと通らないことがあるため
+  if(response.status === 401){
+    response = await requestGemini(systemPrompt, contents, true);
+  }
+
   if(!response.ok){
-    throw new Error("APIリクエストに失敗しました（status "+response.status+"）");
+    let detail = "";
+    try{ const errData = await response.json(); detail = errData.error && errData.error.message ? "："+errData.error.message : ""; }catch(_e){}
+    throw new Error("APIリクエストに失敗しました（status "+response.status+"）"+detail);
   }
   const data = await response.json();
-  const textBlock = (data.content || []).find(b=>b.type==="text");
-  return textBlock ? textBlock.text : "";
+  const candidate = (data.candidates || [])[0];
+  if(!candidate || !candidate.content || !candidate.content.parts){
+    throw new Error("応答を取得できませんでした（安全フィルタ等でブロックされた可能性があります）");
+  }
+  return candidate.content.parts.map(p=>p.text||"").join("");
 }
 
 async function startExercise(catId, key){
@@ -320,7 +389,7 @@ async function startExercise(catId, key){
   try{
     const systemPrompt = EXERCISE_PROMPTS[key];
     const kickoff = [{role:"user", content:"（このエクササイズを開始してください）"}];
-    const reply = await callClaude(systemPrompt, kickoff);
+    const reply = await callGemini(systemPrompt, kickoff);
     setState({
       messages:[{role:"assistant", content:reply}],
       loading:false
@@ -337,7 +406,7 @@ async function sendMessage(text){
   setState({messages:newMessages, loading:true, error:null});
   try{
     const systemPrompt = EXERCISE_PROMPTS[key];
-    const reply = await callClaude(systemPrompt, newMessages);
+    const reply = await callGemini(systemPrompt, newMessages);
     setState({messages:[...newMessages, {role:"assistant", content:reply}], loading:false});
   }catch(e){
     setState({loading:false, error: e.message || String(e)});
@@ -366,12 +435,63 @@ function el(tag, attrs, children){
   return node;
 }
 
+function renderSettingsBar(){
+  const bar = el("div", {class:"settings-bar"});
+  const status = el("span", {class:"settings-status " + (apiKey ? "ok" : "warn")}, [
+    apiKey ? "● APIキー設定済み" : "● APIキー未設定"
+  ]);
+  const toggleBtn = el("button", {class:"settings-toggle", onClick:()=>{
+    settingsOpen = !settingsOpen;
+    render();
+  }}, [settingsOpen ? "設定を閉じる ▲" : "APIキー設定 ▼"]);
+
+  const row = el("div", {class:"settings-row"});
+  row.appendChild(status);
+  row.appendChild(toggleBtn);
+  bar.appendChild(row);
+
+  if(settingsOpen){
+    const panel = el("div", {class:"settings-panel"});
+    panel.appendChild(el("label", {class:"settings-label"}, ["Google AI StudioのAPIキー"]));
+    const keyInput = el("input", {
+      type:"password", class:"settings-input", id:"api-key-input",
+      placeholder:"AIza...", value: apiKey
+    });
+    panel.appendChild(keyInput);
+
+    panel.appendChild(el("label", {class:"settings-label", style:"margin-top:10px;"}, ["使用するモデル"]));
+    const select = el("select", {class:"settings-input", id:"model-select"});
+    MODEL_OPTIONS.forEach(m=>{
+      const opt = el("option", {value:m.id}, [m.label]);
+      if(m.id === modelId) opt.setAttribute("selected","true");
+      select.appendChild(opt);
+    });
+    panel.appendChild(select);
+
+    const saveBtn = el("button", {class:"settings-save", onClick:()=>{
+      const k = document.getElementById("api-key-input").value.trim();
+      const m = document.getElementById("model-select").value;
+      apiKey = k;
+      modelId = m;
+      settingsOpen = false;
+      render();
+    }}, ["保存"]);
+    panel.appendChild(saveBtn);
+
+    panel.appendChild(el("p", {class:"settings-hint"}, [
+      "APIキーはこの画面を開いている間だけメモリ上に保持され、リロードすると消えます。キーはGoogle AI Studio（aistudio.google.com/apikey）で発行できます。"
+    ]));
+    bar.appendChild(panel);
+  }
+  return bar;
+}
+
 function renderHeader(){
   const wrap = el("div", {class:"app-header"});
   wrap.appendChild(el("div", {class:"eyebrow"}, ["MOTIVATIONAL INTERVIEWING PRACTICE"]));
   wrap.appendChild(el("h1", {class:"title"}, ["MIエクササイズ・ラボ"]));
   wrap.appendChild(el("p", {class:"subtitle"}, [
-    "動機づけ面接（MI）の対話スキルを、AIを相手役にしたロールプレイで練習します。エクササイズを選ぶと、AIがトレーナーまたは患者役として対話をリードします。"
+    "動機づけ面接（MI）の対話スキルを、Gemini APIを相手役にしたロールプレイで練習します。エクササイズを選ぶと、AIがトレーナーまたは患者役として対話をリードします。"
   ]));
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
@@ -572,6 +692,7 @@ function renderChatView(catId, key){
 function render(){
   const root = document.getElementById("root");
   root.innerHTML = "";
+  root.appendChild(renderSettingsBar());
   let view;
   switch(state.view.name){
     case "category":
