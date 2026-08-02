@@ -601,12 +601,22 @@ async function callGemini(systemPrompt, messages){
   return candidate.content.parts.map(p=>p.text||"").join("");
 }
 
+const OUTPUT_STYLE_INSTRUCTION = "\n\n【出力形式に関する注意】\n応答はMarkdownを使わない自然な地の文で書いてください。**太字**などの強調記号、#による見出し、-や*による箇条書き記号は使わないでください。箇条書きが必要な場合は「1.」「2.」のような番号か、改行と読点で自然に表現してください。";
+
+function sanitizeDisplayText(text){
+  if(!text) return text;
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "$1")     // **強調** → 強調
+    .replace(/(^|\n)\s*[-*]\s+/g, "$1")  // 行頭の - や * の箇条書き記号を除去
+    .replace(/(^|\n)#{1,6}\s*/g, "$1");  // 見出し記号を除去
+}
+
 function buildSystemPrompt(key){
-  const base = EXERCISE_PROMPTS[key];
+  let prompt = EXERCISE_PROMPTS[key];
   if(selectedDifficulty === "high" && DIFFICULTY_MODIFIERS[key]){
-    return base + "\n\n【難易度：高め】\n" + DIFFICULTY_MODIFIERS[key];
+    prompt += "\n\n【難易度：高め】\n" + DIFFICULTY_MODIFIERS[key];
   }
-  return base;
+  return prompt + OUTPUT_STYLE_INSTRUCTION;
 }
 
 async function startExercise(catId, key){
@@ -918,7 +928,7 @@ function renderChatView(catId, key){
     chatWindow.appendChild(el("div", {class:"empty-hint"}, ["AIトレーナーを呼び出しています…"]));
   }
   state.messages.forEach(m=>{
-    chatWindow.appendChild(el("div", {class:"msg " + m.role}, [m.content]));
+    chatWindow.appendChild(el("div", {class:"msg " + m.role}, [sanitizeDisplayText(m.content)]));
   });
   if(state.loading){
     chatWindow.appendChild(el("div", {class:"msg typing"}, ["AIが応答を作成しています…"]));
