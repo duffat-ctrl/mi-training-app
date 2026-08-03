@@ -527,11 +527,11 @@ function findExercise(catId, key){
 let settingsOpen = false;
 let selectedDifficulty = "standard"; // "standard" | "high" — 応用編5個のみ対象
 const DIFFICULTY_MODIFIERS = {
-  change_talk_listen: "患者の発言では、チェンジトークと維持トークの分量や強さを拮抗させ、どちらが優勢かを一見して判断しにくくしてください。チェンジトークの言い回しも、直接的な表現ではなく、やや婉曲・間接的な言い方にしてください。",
-  change_talk_evoke: "提示するチェンジトークは、直接的な変化の言葉ではなく、皮肉・ためらい・葛藤混じりの婉曲な言い回しにしてください。",
-  change_talk_strengthen: "混ぜ込む「小さなチェンジトーク」は、より短く・より控えめな言い回しにし、維持トークの中に一層自然に紛れ込ませてください。",
-  sustain_talk: "患者役はより頑なな態度を示し、こちらの応答に対しても簡単には軟化しないでください。チェンジトークが漏れるとしても、ごく小さく・慎重な言い回しにとどめてください。",
-  discord_batting: "患者はより感情的・攻撃的な言葉遣いで不協和発言をしてください。こちらの応答が的確でも、患者の態度がすぐには収まらず、粘り強い対応が必要な場面を作ってください。"
+  change_talk_listen: "チェンジトークは1つだけにしてください。比喩・皮肉・条件文（『〜なら考えてもいいけど』等）に包み、「変えたい」「変わりたい」のような直接的な語は一切使わないでください。維持トークの分量をチェンジトークの2倍以上にし、発言全体をさっと読んだだけでは気づけないくらい深く紛れ込ませてください。",
+  change_talk_evoke: "提示するチェンジトークは、額面通りには変化への言葉に見えない一文にしてください（例：愚痴や不満に見えて、実は変化への言及を含んでいる等）。「変えたい」「〜したい」のような直接的な語は使わないでください。",
+  change_talk_strengthen: "混ぜ込む「小さなチェンジトーク」は数語程度のごく短いものにし、文の途中に埋もれさせてください。その直後に維持トークの話題へすぐ戻り、聞き逃しやすい配置にしてください。",
+  sustain_talk: "患者役は、私の応答が技法的に正しくても最初の1〜2回は軟化を見せず、同じ主張を繰り返す・話をそらす・軽く受け流すなどで応答してください。3回以上、一貫して的確な技法が使われた場合に限り、ため息や小さな譲歩の言葉など、ごくわずかな変化を見せてください。",
+  discord_batting: "患者の不協和発言には、皮肉や相手の力量への当てこすりを含めてください。私の応答が技法的に正しくても、最初の1往復では態度が完全には収まらないようにしてください。2〜3回、一貫して的確な応答が続いた場合にのみ、態度がはっきりと和らぐようにしてください。"
 };
 let state = {
   view: {name:"home"},
@@ -603,6 +603,8 @@ async function callGemini(systemPrompt, messages){
 
 const OUTPUT_STYLE_INSTRUCTION = "\n\n【出力形式に関する注意】\n応答はMarkdownを使わない自然な地の文で書いてください。**太字**などの強調記号、#による見出し、-や*による箇条書き記号は使わないでください。箇条書きが必要な場合は「1.」「2.」のような番号か、改行と読点で自然に表現してください。";
 
+const NO_PREAMBLE_INSTRUCTION = "\n\n【前置きに関する注意】\n自分の役割の自己紹介や「承知しました」「それでは始めます」といった前置き・相槌は一切書かないでください。挨拶や説明を挟まず、指示された内容（患者の発言、問題文、フィードバックなど）だけをそのまま出力してください。";
+
 function sanitizeDisplayText(text){
   if(!text) return text;
   return text
@@ -616,7 +618,7 @@ function buildSystemPrompt(key){
   if(selectedDifficulty === "high" && DIFFICULTY_MODIFIERS[key]){
     prompt += "\n\n【難易度：高め】\n" + DIFFICULTY_MODIFIERS[key];
   }
-  return prompt + OUTPUT_STYLE_INSTRUCTION;
+  return prompt + OUTPUT_STYLE_INSTRUCTION + NO_PREAMBLE_INSTRUCTION;
 }
 
 async function startExercise(catId, key){
